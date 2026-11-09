@@ -1,0 +1,21 @@
+[package]
+name = "rd-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "lowlat-desk client: receive, decode, and present a host screen"
+
+[features]
+default = ["rd-codec/software-openh264"]
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rd-codec.workspace = true
+rd-proto.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+winit = "0.30"
+pixels = "0.17"

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: C++ toolchain for OpenH264
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Test workspace
+        run: cargo test --workspace --locked
+
+  host-windows:
+    name: host (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build host
+        run: cargo build --release --locked -p rd-host
+      - name: Test protocol and codecs
+        run: cargo test --release --locked -p rd-proto -p rd-pixel -p rd-codec
+
+  client-windows:
+    name: client (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build client
+        run: cargo build --release --locked -p rd-client
+
+  client-macos:
+    name: client (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build client
+        run: cargo build --release --locked -p rd-client
+      - name: Test protocol and codecs
+        run: cargo test --locked -p rd-proto -p rd-pixel -p rd-codec

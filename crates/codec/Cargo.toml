@@ -1,0 +1,38 @@
+[package]
+name = "rd-codec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "H.264 encode and decode for lowlat-desk"
+
+[features]
+default = ["software-openh264"]
+# Cisco's OpenH264, built from the sources shipped by the openh264 crate.
+# Baseline profile: no B-frames. Used as the software fallback on every OS,
+# and as the only codec when Media Foundation or VideoToolbox is unavailable.
+software-openh264 = ["dep:openh264"]
+
+[dependencies]
+anyhow.workspace = true
+rd-proto.workspace = true
+rd-pixel.workspace = true
+tracing.workspace = true
+openh264 = { version = "0.9.9", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-core-media = "0.3"
+objc2-core-video = "0.3"
+objc2-video-toolbox = "0.3"

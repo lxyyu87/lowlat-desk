@@ -1,0 +1,10 @@
+[package]
+name = "rd-pixel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "BGRA/NV12 conversion and downscale used by the host and client"
+
+[dependencies]
