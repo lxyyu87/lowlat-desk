@@ -851,62 +851,168 @@ impl VideoDecoder for MfDecoder {
 
     fn decode(&mut self, annex_b: &[u8]) -> Result<Option<DecodedPicture>> {
         self.ensure_engine()?;
-        let engine = self.engine.as_mut().context("decoder missing")?;
-        let sample = memory_sample(&normalize_access_unit(annex_b), 0, 0)?;
-        let outputs = engine.process(sample)?;
+        let (outputs, negotiated) = {
+            let engine = self.engine.as_mut().context("decoder missing")?;
+            let sample = memory_sample(&normalize_access_unit(annex_b), 0, 0)?;
+            let outputs = engine.process(sample)?;
+            let negotiated = negotiated_output(engine);
+            (outputs, negotiated)
+        };
+        if let Some(info) = &negotiated {
+            self.output = info.kind;
+        }
+        let info = negotiated.unwrap_or(OutputInfo {
+            kind: self.output,
+            width: self.hint.0,
+            height: self.hint.1,
+            stride: 0,
+        });
         let mut picture = None;
         for sample in &outputs {
             let bytes = sample_bytes(sample)?;
             if bytes.is_empty() {
                 continue;
             }
-            picture = Some(picture_from_output(self.output, self.hint, &bytes)?);
+            picture = Some(picture_from_output(&info, &bytes)?);
         }
         Ok(picture)
     }
 }
 
-fn picture_from_output(
+struct OutputInfo {
     kind: OutputKind,
-    hint: (u32, u32, u32),
-    bytes: &[u8],
-) -> Result<DecodedPicture> {
-    let (hint_w, hint_h, _) = hint;
-    match kind {
-        OutputKind::Rgb32 => {
-            let (width, height) = infer_rgb_size(bytes.len(), hint_w, hint_h)?;
-            let mut rgba = vec![0u8; width as usize * height as usize * 4];
-            rd_pixel::bgra_to_rgba(bytes, width, height, width as usize * 4, &mut rgba)?;
-            Ok(DecodedPicture {
-                width,
-                height,
-                rgba,
-            })
+    width: u32,
+    height: u32,
+    /// Row stride in bytes. Zero means the buffer is tightly packed.
+    /// Negative means the image is stored bottom-up.
+    stride: i32,
+}
+
+fn negotiated_output(engine: &Engine) -> Option<OutputInfo> {
+    unsafe {
+        let media_type = engine
+            .transform
+            .GetOutputCurrentType(engine.output_id)
+            .ok()?;
+        let subtype = media_type.GetGUID(&MF_MT_SUBTYPE).ok()?;
+        let kind = if subtype == MFVideoFormat_RGB32 {
+            OutputKind::Rgb32
+        } else if subtype == MFVideoFormat_NV12 {
+            OutputKind::Nv12
+        } else {
+            return None;
+        };
+        let packed = media_type.GetUINT64(&MF_MT_FRAME_SIZE).ok()?;
+        let width = (packed >> 32) as u32;
+        let height = (packed & 0xffff_ffff) as u32;
+        if width == 0 || height == 0 {
+            return None;
         }
+        let stride = media_type
+            .GetUINT32(&MF_MT_DEFAULT_STRIDE)
+            .map(|value| value as i32)
+            .unwrap_or(0);
+        Some(OutputInfo {
+            kind,
+            width,
+            height,
+            stride,
+        })
+    }
+}
+
+fn picture_from_output(info: &OutputInfo, bytes: &[u8]) -> Result<DecodedPicture> {
+    if info.width == 0 || info.height == 0 {
+        bail!(
+            "decoder output is {} bytes and has no frame size",
+            bytes.len()
+        );
+    }
+    let packed = match info.kind {
+        OutputKind::Rgb32 => pack_rows(bytes, info.width, info.height, 4, info.stride)?,
         OutputKind::Nv12 => {
-            let (width, height) = infer_nv12_size(bytes.len(), hint_w, hint_h)?;
-            let mut rgba = vec![0u8; width as usize * height as usize * 4];
-            nv12_to_rgba(bytes, width, height, &mut rgba)?;
-            Ok(DecodedPicture {
-                width,
-                height,
+            let tight = pack_nv12(bytes, info.width, info.height, info.stride)?;
+            let mut rgba = vec![0u8; info.width as usize * info.height as usize * 4];
+            nv12_to_rgba(&tight, info.width, info.height, &mut rgba)?;
+            return Ok(DecodedPicture {
+                width: info.width,
+                height: info.height,
                 rgba,
-            })
+            });
         }
         OutputKind::Unknown => bail!("decoder output format was not negotiated"),
-    }
+    };
+    let mut rgba = vec![0u8; info.width as usize * info.height as usize * 4];
+    rd_pixel::bgra_to_rgba(
+        &packed,
+        info.width,
+        info.height,
+        info.width as usize * 4,
+        &mut rgba,
+    )?;
+    Ok(DecodedPicture {
+        width: info.width,
+        height: info.height,
+        rgba,
+    })
 }
 
-fn infer_rgb_size(len: usize, hint_w: u32, hint_h: u32) -> Result<(u32, u32)> {
-    if hint_w > 0 && hint_h > 0 && len == hint_w as usize * hint_h as usize * 4 {
-        return Ok((hint_w, hint_h));
+/// Copy a possibly strided, possibly bottom-up image into a tightly packed buffer.
+fn pack_rows(bytes: &[u8], width: u32, height: u32, bpp: usize, stride: i32) -> Result<Vec<u8>> {
+    let w = width as usize * bpp;
+    let h = height as usize;
+    let row_stride = if stride == 0 { w as i32 } else { stride };
+    let abs_stride = row_stride.unsigned_abs() as usize;
+    if abs_stride < w {
+        bail!("decoder stride {row_stride} is narrower than the frame");
     }
-    bail!("rgb decoder output is {len} bytes and does not match {hint_w}x{hint_h}");
+    let need = abs_stride * h;
+    if bytes.len() < need {
+        bail!(
+            "decoder output is {} bytes, expected at least {need} for {width}x{height}",
+            bytes.len()
+        );
+    }
+    let mut packed = vec![0u8; w * h];
+    for y in 0..h {
+        let src_y = if row_stride < 0 { h - 1 - y } else { y };
+        let start = src_y * abs_stride;
+        packed[y * w..(y + 1) * w].copy_from_slice(&bytes[start..start + w]);
+    }
+    Ok(packed)
 }
 
-fn infer_nv12_size(len: usize, hint_w: u32, hint_h: u32) -> Result<(u32, u32)> {
-    if hint_w > 0 && hint_h > 0 && len >= rd_pixel::nv12_len(hint_w, hint_h) {
-        return Ok((hint_w, hint_h));
+fn pack_nv12(bytes: &[u8], width: u32, height: u32, stride: i32) -> Result<Vec<u8>> {
+    let w = width as usize;
+    let h = height as usize;
+    let row_stride = if stride == 0 { w as i32 } else { stride };
+    if row_stride == w as i32 && bytes.len() >= rd_pixel::nv12_len(width, height) {
+        return Ok(bytes[..rd_pixel::nv12_len(width, height)].to_vec());
     }
-    bail!("nv12 decoder output is {len} bytes and does not match {hint_w}x{hint_h}");
+    let abs_stride = row_stride.unsigned_abs() as usize;
+    if abs_stride < w || !height.is_multiple_of(2) {
+        bail!("decoder NV12 stride {row_stride} does not fit {width}x{height}");
+    }
+    let y_bytes = abs_stride * h;
+    let uv_rows = h / 2;
+    if bytes.len() < y_bytes + abs_stride * uv_rows {
+        bail!(
+            "decoder NV12 output is {} bytes for {width}x{height} stride {row_stride}",
+            bytes.len()
+        );
+    }
+    let mut packed = vec![0u8; w * h * 3 / 2];
+    for y in 0..h {
+        let src_y = if row_stride < 0 { h - 1 - y } else { y };
+        let start = src_y * abs_stride;
+        packed[y * w..(y + 1) * w].copy_from_slice(&bytes[start..start + w]);
+    }
+    let uv_base = if row_stride < 0 { 0 } else { y_bytes };
+    for y in 0..uv_rows {
+        let src_y = if row_stride < 0 { uv_rows - 1 - y } else { y };
+        let start = uv_base + src_y * abs_stride;
+        let dst = w * h + y * w;
+        packed[dst..dst + w].copy_from_slice(&bytes[start..start + w]);
+    }
+    Ok(packed)
 }
