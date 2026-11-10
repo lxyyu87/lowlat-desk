@@ -5,3 +5,5 @@
 *.dll
 *.exe
 *.dSYM
+__pycache__/
+*.pyc
