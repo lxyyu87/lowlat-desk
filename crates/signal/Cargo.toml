@@ -1,0 +1,18 @@
+[package]
+name = "rd-signal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "Signaling, UDP hole-punch rendezvous, and relay for lowlat-desk"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rd-session.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+rd-proto.workspace = true

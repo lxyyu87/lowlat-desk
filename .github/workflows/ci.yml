@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: C++ toolchain for OpenH264
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Test workspace
+        run: cargo test --workspace --locked
+      - name: PE import checker
+        run: python3 .github/scripts/pe_imports.py --self-test
+      - name: Package signal server
+        run: |
+          cargo build --release --locked -p rd-signal
+          mkdir -p dist/lowlat-desk-signal-linux-x64
+          cp target/release/rd-signal dist/lowlat-desk-signal-linux-x64/
+          cp .github/instructions/signal-linux.txt dist/lowlat-desk-signal-linux-x64/使用说明.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-signal-linux-x64
+          path: dist/lowlat-desk-signal-linux-x64
+          if-no-files-found: error
+
+  host-windows:
+    name: host (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test protocol and codecs
+        run: cargo test --release --locked -p rd-proto -p rd-pixel -p rd-codec
+      - name: Package host
+        shell: pwsh
+        run: .\.github\scripts\package-windows.ps1 -Which host
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-host-windows-x64
+          path: dist/lowlat-desk-host-windows-x64
+          if-no-files-found: error
+
+  client-windows:
+    name: client (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Package client
+        shell: pwsh
+        run: .\.github\scripts\package-windows.ps1 -Which client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-client-windows-x64
+          path: dist/lowlat-desk-client-windows-x64
+          if-no-files-found: error
+
+  client-macos:
+    name: client (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test protocol and codecs
+        run: cargo test --locked -p rd-proto -p rd-pixel -p rd-codec
+      - name: Package universal client
+        run: bash .github/scripts/package-macos-client.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-client-macos
+          path: dist/lowlat-desk-client-macos
+          if-no-files-found: error

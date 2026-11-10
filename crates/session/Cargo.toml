@@ -1,0 +1,15 @@
+[package]
+name = "rd-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "Encrypted sessions, reliable input, STUN, and the signaling protocol"
+
+[dependencies]
+anyhow.workspace = true
+rd-proto.workspace = true
+sha2.workspace = true
+snow.workspace = true
+tracing.workspace = true

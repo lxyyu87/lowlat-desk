@@ -1,0 +1,20 @@
+lowlat-desk 信令服务器（Linux x86_64）
+
+这个程序不需要安装 Rust。把它放到有公网地址的机器上，同时放行 TCP 和 UDP。
+默认端口是 47010。云厂商安全组和本机防火墙都要打开这两个协议。
+
+  ./rd-signal --listen 0.0.0.0:47010
+
+被控端：
+  rd-host.exe --signal 这台机器的公网IP:47010 --id 设备号 --password 口令
+
+控制端：
+  rd-client.exe --signal 这台机器的公网IP:47010 --id 设备号 --password 口令
+
+画面和键鼠是端到端加密的。信令 TCP 上只会看到口令的校验值，看不到口令本身，也解不开画面。
+打洞失败时，数据会从这台机器的 UDP 端口转发。只开放 TCP 时，注册能成功，画面过不来。
+
+Docker（在源码仓库根目录）：
+  docker build -f crates/signal/Dockerfile -t lowlat-signal .
+  docker run -d --name lowlat-signal --restart unless-stopped \
+    -p 47010:47010/tcp -p 47010:47010/udp lowlat-signal
