@@ -1,13 +1,14 @@
-//! Host for the phase 1 LAN stream.
+//! Host: capture, encode, and send a screen.
 //!
 //! On Windows this captures the desktop with DXGI Desktop Duplication, encodes
-//! H.264, and sends Annex-B access units as UDP fragments. Other operating
-//! systems can still run `--test-pattern`, which exercises the same encoder
-//! and packetizer without a desktop.
+//! H.264, and injects client input with `SendInput`. LAN viewers connect by
+//! IP. Internet viewers meet this host through `rd-signal`. Other operating
+//! systems can still run `--test-pattern`.
 
 mod capture;
+mod input;
+mod transport;
 
-use std::net::UdpSocket;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,7 @@ use rd_codec::{open_encoder, EncodeConfig, VideoEncoder};
 use rd_proto::{
     kind, Fragmenter, HelloAck, ParameterSetCache, VideoFrame, CODEC_H264, MAX_DATAGRAM,
 };
+use rd_session::{Role, SessionParams, SESSION_WRAP};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Parser)]
@@ -54,6 +56,21 @@ struct Args {
     /// Test-pattern height.
     #[arg(long, default_value_t = 720)]
     height: u32,
+    /// Signal server, for example `203.0.113.10:47010`. Omit this to stay on the LAN.
+    #[arg(long)]
+    signal: Option<std::net::SocketAddr>,
+    /// Device id the client types to find this host.
+    #[arg(long)]
+    id: Option<String>,
+    /// Shared password. The signal server only sees a verifier, not this value.
+    #[arg(long)]
+    password: Option<String>,
+    /// Skip UDP hole punching and relay through the signal server.
+    #[arg(long)]
+    force_relay: bool,
+    /// STUN servers. Empty uses the built-in list. `none` disables STUN.
+    #[arg(long, value_delimiter = ',')]
+    stun: Vec<String>,
 }
 
 fn main() {
@@ -104,14 +121,54 @@ fn run(args: Args) -> Result<()> {
     if !(1..=240).contains(&args.fps) {
         bail!("--fps must be 1..=240");
     }
-    let socket = UdpSocket::bind(args.listen).with_context(|| format!("bind {}", args.listen))?;
-    socket.set_nonblocking(true)?;
-    info!(addr = %args.listen, "listening");
-
     let mut source = open_source(&args)?;
     let (source_w, source_h) = source.size();
     info!(width = source_w, height = source_h, "capture size");
+    if args.signal.is_some() {
+        loop {
+            let transport = match connect_signal(&args) {
+                Ok(transport) => transport,
+                Err(err) => {
+                    warn!(error = %err, "signal registration failed");
+                    thread::sleep(Duration::from_secs(2));
+                    continue;
+                }
+            };
+            if let Err(err) = stream(&args, &mut source, transport) {
+                warn!(error = %err, "internet session ended");
+                thread::sleep(Duration::from_secs(1));
+            }
+        }
+    } else {
+        let transport = transport::Transport::lan(args.listen, args.bitrate)?;
+        stream(&args, &mut source, transport)
+    }
+}
 
+fn connect_signal(args: &Args) -> Result<transport::Transport> {
+    let signal = args.signal.context("missing --signal")?;
+    let id = args.id.clone().context("--id is required with --signal")?;
+    let password = args
+        .password
+        .clone()
+        .context("--password is required with --signal")?;
+    info!(%signal, %id, "registering with the signal server");
+    let params = SessionParams {
+        signal,
+        id,
+        password,
+        role: Role::Host,
+        force_relay: args.force_relay,
+        stun: rd_session::stun_from_args(&args.stun),
+    };
+    transport::Transport::internet(&params, args.bitrate)
+}
+
+fn stream(
+    args: &Args,
+    source: &mut Box<dyn FrameSource>,
+    mut link: transport::Transport,
+) -> Result<()> {
     let mut encoder: Option<Box<dyn VideoEncoder>> = None;
     let mut encoded_size = (0u32, 0u32);
     let mut fragmenter = Fragmenter::new();
@@ -124,12 +181,18 @@ fn run(args: Args) -> Result<()> {
     let epoch = Instant::now();
     let frame_interval = Duration::from_micros(1_000_000 / args.fps as u64);
     let mut next_tick = Instant::now();
-    let mut packet = [0u8; MAX_DATAGRAM + 64];
+    let max_datagram = if link.is_internet() {
+        MAX_DATAGRAM - SESSION_WRAP
+    } else {
+        MAX_DATAGRAM
+    };
+    fragmenter = fragmenter.with_max_datagram(max_datagram);
+    let mut applied_bitrate = args.bitrate;
 
     loop {
-        while let Ok((n, src)) = socket.recv_from(&mut packet) {
+        for (packet, src) in link.pump()? {
             if let Some(next) =
-                handle_control(&packet[..n], src, &mut client, &mut fragmenter, &socket)?
+                handle_control(&packet, src, &mut client, &mut fragmenter, &mut link)?
             {
                 force_idr = true;
                 if next {
@@ -137,6 +200,29 @@ fn run(args: Args) -> Result<()> {
                     encoded_size = (0, 0);
                 }
             }
+        }
+        let events = link.take_inputs();
+        if !events.is_empty() && encoded_size.0 > 0 {
+            let (desktop_w, desktop_h) = source.size();
+            let (origin_x, origin_y) = source.origin();
+            input::inject(
+                &events,
+                input::DesktopTarget {
+                    origin_x,
+                    origin_y,
+                    desktop_w,
+                    desktop_h,
+                    encoded_w: encoded_size.0,
+                    encoded_h: encoded_size.1,
+                },
+            );
+        }
+        let adapted = link.bitrate();
+        if applied_bitrate > 0 && adapted.abs_diff(applied_bitrate) * 100 / applied_bitrate >= 15 {
+            info!(from = applied_bitrate, to = adapted, "adapted bitrate");
+            applied_bitrate = adapted;
+            encoder = None;
+            force_idr = true;
         }
 
         let Some(viewer) = client.as_ref() else {
@@ -180,7 +266,7 @@ fn run(args: Args) -> Result<()> {
                 width,
                 height,
                 fps: args.fps,
-                bitrate_bps: args.bitrate,
+                bitrate_bps: applied_bitrate,
                 gop: args.gop.max(1),
             };
             encoder = Some(open_encoder(config)?);
@@ -194,7 +280,7 @@ fn run(args: Args) -> Result<()> {
                 codec: CODEC_H264,
             };
             let packet = fragmenter.control(kind::HELLO_ACK, &ack.encode())?;
-            socket.send_to(&packet, viewer_addr)?;
+            link.send(&packet, viewer_addr)?;
             info!(width, height, "sent HelloAck");
         }
         cached = Some(bgra.clone());
@@ -225,7 +311,10 @@ fn run(args: Args) -> Result<()> {
         })?;
         frame_id = frame_id.wrapping_add(1);
         for packet in &packets {
-            if let Err(err) = socket.send_to(packet, viewer_addr) {
+            if let Err(err) = link.send(packet, viewer_addr) {
+                if link.is_internet() {
+                    return Err(err);
+                }
                 warn!(error = %err, "send failed");
                 break;
             }
@@ -258,8 +347,13 @@ fn handle_control(
     src: std::net::SocketAddr,
     client: &mut Option<Client>,
     fragmenter: &mut Fragmenter,
-    socket: &UdpSocket,
+    link: &mut transport::Transport,
 ) -> Result<Option<bool>> {
+    let max_datagram = if link.is_internet() {
+        MAX_DATAGRAM - SESSION_WRAP
+    } else {
+        MAX_DATAGRAM
+    };
     let (header, payload) = match rd_proto::parse_packet(datagram) {
         Ok(parsed) => parsed,
         Err(_) => return Ok(None),
@@ -275,7 +369,7 @@ fn handle_control(
                 addr: src,
                 seen: Instant::now(),
             });
-            *fragmenter = Fragmenter::new();
+            *fragmenter = Fragmenter::new().with_max_datagram(max_datagram);
             Ok(Some(changed || true))
         }
         kind::KEYFRAME_REQUEST => {
@@ -287,7 +381,7 @@ fn handle_control(
             touch(client, src);
             if payload.len() >= 8 {
                 let pong = fragmenter.control(kind::PONG, payload)?;
-                let _ = socket.send_to(&pong, src);
+                let _ = link.send(&pong, src);
             }
             Ok(None)
         }

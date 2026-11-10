@@ -15,6 +15,7 @@ anyhow.workspace = true
 clap.workspace = true
 rd-codec.workspace = true
 rd-proto.workspace = true
+rd-session.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 winit = "0.30"

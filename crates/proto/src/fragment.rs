@@ -56,6 +56,12 @@ impl Fragmenter {
         }
     }
 
+    /// Smaller datagrams leave room for an encryption header on the internet path.
+    pub fn with_max_datagram(mut self, max_datagram: usize) -> Self {
+        self.max_datagram = max_datagram.max(HEADER_LEN + 1);
+        self
+    }
+
     pub fn control(&mut self, kind_id: u8, payload: &[u8]) -> Result<Vec<u8>, Error> {
         let header = Header {
             kind: kind_id,
@@ -133,6 +139,8 @@ pub struct Reassembler {
     latest: Option<AssembledFrame>,
     wait_idr: bool,
     hole_since: Option<Instant>,
+    received: u64,
+    lost: u64,
 }
 
 impl Default for Reassembler {
@@ -150,7 +158,17 @@ impl Reassembler {
             latest: None,
             wait_idr: false,
             hole_since: None,
+            received: 0,
+            lost: 0,
         }
+    }
+
+    /// Packets delivered and packets skipped since the last call.
+    pub fn take_loss(&mut self) -> (u64, u64) {
+        let counters = (self.received, self.lost);
+        self.received = 0;
+        self.lost = 0;
+        counters
     }
 
     pub fn push(&mut self, datagram: &[u8], now: Instant) -> Result<PushOutcome, Error> {
@@ -183,6 +201,8 @@ impl Reassembler {
                 .is_some_and(|age| age > PARTIAL_TIMEOUT)
         }) {
             if let Some((&seq, _)) = self.buffer.iter().next() {
+                let gap = seq.wrapping_sub(self.next_seq) as u64;
+                self.lost = self.lost.wrapping_add(gap);
                 self.partial = None;
                 self.wait_idr = true;
                 outcome.request_keyframe = true;
@@ -203,6 +223,7 @@ impl Reassembler {
             if self.buffer.contains_key(&self.next_seq) {
                 let datagram = self.buffer.remove(&self.next_seq).expect("checked");
                 self.next_seq = self.next_seq.wrapping_add(1);
+                self.received = self.received.wrapping_add(1);
                 self.hole_since = None;
                 self.deliver(&datagram, now, outcome)?;
                 continue;
@@ -212,6 +233,7 @@ impl Reassembler {
             };
             let ahead = seq.wrapping_sub(self.next_seq);
             if ahead > REORDER_WINDOW && ahead < 0x8000_0000 {
+                self.lost = self.lost.wrapping_add(u64::from(ahead));
                 self.partial = None;
                 self.wait_idr = true;
                 outcome.request_keyframe = true;

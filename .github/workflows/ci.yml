@@ -22,6 +22,17 @@ jobs:
         run: cargo test --workspace --locked
       - name: PE import checker
         run: python3 .github/scripts/pe_imports.py --self-test
+      - name: Package signal server
+        run: |
+          cargo build --release --locked -p rd-signal
+          mkdir -p dist/lowlat-desk-signal-linux-x64
+          cp target/release/rd-signal dist/lowlat-desk-signal-linux-x64/
+          cp .github/instructions/signal-linux.txt dist/lowlat-desk-signal-linux-x64/使用说明.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-signal-linux-x64
+          path: dist/lowlat-desk-signal-linux-x64
+          if-no-files-found: error
 
   host-windows:
     name: host (windows)

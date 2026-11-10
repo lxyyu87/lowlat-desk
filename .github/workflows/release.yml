@@ -63,9 +63,28 @@ jobs:
           path: dist/lowlat-desk-client-macos
           if-no-files-found: error
 
+  signal-linux:
+    name: signal (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Package signal server
+        run: |
+          cargo build --release --locked -p rd-signal
+          mkdir -p dist/lowlat-desk-signal-linux-x64
+          cp target/release/rd-signal dist/lowlat-desk-signal-linux-x64/
+          cp .github/instructions/signal-linux.txt dist/lowlat-desk-signal-linux-x64/使用说明.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-signal-linux-x64
+          path: dist/lowlat-desk-signal-linux-x64
+          if-no-files-found: error
+
   publish:
     name: publish release
-    needs: [host-windows, client-windows, client-macos]
+    needs: [host-windows, client-windows, client-macos, signal-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -102,11 +121,13 @@ jobs:
             release/lowlat-desk-host-windows-x64.zip
             release/lowlat-desk-client-windows-x64.zip
             release/lowlat-desk-client-macos.zip
+            release/lowlat-desk-signal-linux-x64.zip
           body: |
-            预编译的阶段 1 程序，不需要安装 Rust 或额外运行库。
+            预编译程序，不需要安装 Rust 或额外运行库。
 
             - `lowlat-desk-host-windows-x64.zip`：Windows 被控端
             - `lowlat-desk-client-windows-x64.zip`：Windows 控制端
             - `lowlat-desk-client-macos.zip`：macOS 控制端（arm64 + x86_64 通用 rd-client.app）
+            - `lowlat-desk-signal-linux-x64.zip`：Linux 信令 / 中继
 
             每个压缩包里都有 `使用说明.txt`。

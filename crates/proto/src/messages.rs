@@ -131,10 +131,11 @@ impl HelloAck {
     }
 }
 
-/// Phase 2 input slot. The phase 1 host does not inject these; the phase 1
-/// client does not send them. Absolute mouse coordinates are in the host
-/// capture pixel space. `vk` / `scan` match the Windows `SendInput` fields
-/// the host will use later.
+/// Mouse and keyboard events on the reliable channel.
+///
+/// Absolute mouse coordinates are in the host picture the client is showing
+/// (the encoded frame, not the window). `vk` is a Windows virtual-key code.
+/// `scan` may be zero; the host then injects by virtual key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputEvent {
     MouseMove { x: u16, y: u16 },

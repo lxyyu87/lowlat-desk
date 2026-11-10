@@ -9,11 +9,15 @@ lowlat-desk 控制端（macOS，Apple 芯片和 Intel 通用）
   或执行：
   xattr -dr com.apple.quarantine rd-client.app
 
-然后必须在终端里带上被控端地址运行（不要只双击 app，双击不会带上地址）：
+然后必须在终端里运行（不要只双击 app，双击不会带上地址）：
 
+局域网：
   ./rd-client.app/Contents/MacOS/rd-client --connect 192.168.1.20:47000
 
 把 192.168.1.20 换成被控 Windows 电脑的局域网 IP。端口默认是 47000。
-窗口出现后即可看到对方屏幕。
 
-仅适合可信局域网，没有身份验证。
+公网：
+  ./rd-client.app/Contents/MacOS/rd-client --signal 信令服务器:47010 --id 设备号 --password 口令
+
+窗口出现后即可看到对方屏幕。键盘按物理键位映射成 Windows 虚拟键。
+在画面上移动、点击、滚动和按键会操作被控电脑。

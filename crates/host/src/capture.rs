@@ -10,6 +10,10 @@ pub struct Captured {
 
 pub trait FrameSource {
     fn size(&self) -> (u32, u32);
+    /// Top-left of this display on the Windows virtual screen.
+    fn origin(&self) -> (i32, i32) {
+        (0, 0)
+    }
     /// `Ok(None)` means the desktop did not change before the timeout.
     fn poll(&mut self, timeout_ms: u32) -> Result<Option<Captured>>;
 }
@@ -97,6 +101,8 @@ mod dxgi {
         staging: ID3D11Texture2D,
         width: u32,
         height: u32,
+        origin_x: i32,
+        origin_y: i32,
     }
 
     impl DxgiCapture {
@@ -128,6 +134,10 @@ mod dxgi {
     impl FrameSource for DxgiCapture {
         fn size(&self) -> (u32, u32) {
             self.state.as_ref().map(State::size).unwrap_or((0, 0))
+        }
+
+        fn origin(&self) -> (i32, i32) {
+            self.state.as_ref().map(State::origin).unwrap_or((0, 0))
         }
 
         fn poll(&mut self, timeout_ms: u32) -> Result<Option<Captured>> {
@@ -216,12 +226,18 @@ mod dxgi {
                     staging: staging.context("staging texture")?,
                     width,
                     height,
+                    origin_x: desc.DesktopCoordinates.left,
+                    origin_y: desc.DesktopCoordinates.top,
                 })
             }
         }
 
         fn size(&self) -> (u32, u32) {
             (self.width, self.height)
+        }
+
+        fn origin(&self) -> (i32, i32) {
+            (self.origin_x, self.origin_y)
         }
 
         fn acquire(&mut self, timeout_ms: u32) -> Result<Option<Captured>> {

@@ -4,10 +4,20 @@ members = [
     "crates/proto",
     "crates/pixel",
     "crates/codec",
+    "crates/session",
+    "crates/signal",
     "crates/host",
     "crates/client",
 ]
-default-members = ["crates/proto", "crates/pixel", "crates/codec", "crates/host", "crates/client"]
+default-members = [
+    "crates/proto",
+    "crates/pixel",
+    "crates/codec",
+    "crates/session",
+    "crates/signal",
+    "crates/host",
+    "crates/client",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -25,3 +35,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rd-proto = { path = "crates/proto" }
 rd-pixel = { path = "crates/pixel" }
 rd-codec = { path = "crates/codec", default-features = false }
+rd-session = { path = "crates/session" }
+sha2 = "0.10"
+snow = "0.9"

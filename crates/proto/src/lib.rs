@@ -5,11 +5,13 @@
 //! later signaling path can hand the same datagrams to a punched UDP socket
 //! or a TURN relay without changing this crate.
 //!
-//! Phase 2 mouse and keyboard events already have a packet kind ([`InputEvent`])
-//! but nothing sends them yet.
+//! Mouse and keyboard events use [`InputEvent`] on a reliable channel. The lossy
+//! video datagrams stay separate. A signaling server can carry the same video
+//! datagrams inside an encrypted session.
 
 mod fragment;
 mod h264;
+mod input_stream;
 mod messages;
 
 pub use fragment::{
@@ -19,6 +21,7 @@ pub use h264::{
     avcc_record_to_annex_b, contains_idr, contains_parameter_sets, is_annex_b, iter_annex_b_nals,
     nal_type, normalize_access_unit, try_length_prefixed_to_annex_b, ParameterSetCache,
 };
+pub use input_stream::{encode_input_message, read_input_message, InputMessage};
 pub use messages::{parse_packet, write_packet, Control, Header, Hello, HelloAck, InputEvent};
 
 /// ASCII `RD01`, little-endian on the wire.
@@ -40,7 +43,7 @@ pub mod kind {
     pub const PING: u8 = 5;
     pub const PONG: u8 = 6;
     pub const GOODBYE: u8 = 7;
-    /// Reserved for phase 2. Parsed, never sent by the phase 1 binaries.
+    /// Legacy datagram slot. Live input uses the reliable channel, not this kind.
     pub const INPUT: u8 = 8;
 }
 
