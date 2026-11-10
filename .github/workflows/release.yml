@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  host-windows:
+    name: host (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test protocol and codecs
+        run: cargo test --release --locked -p rd-proto -p rd-pixel -p rd-codec
+      - name: Package host
+        shell: pwsh
+        run: .\.github\scripts\package-windows.ps1 -Which host
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-host-windows-x64
+          path: dist/lowlat-desk-host-windows-x64
+          if-no-files-found: error
+
+  client-windows:
+    name: client (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Package client
+        shell: pwsh
+        run: .\.github\scripts\package-windows.ps1 -Which client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-client-windows-x64
+          path: dist/lowlat-desk-client-windows-x64
+          if-no-files-found: error
+
+  client-macos:
+    name: client (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test protocol and codecs
+        run: cargo test --locked -p rd-proto -p rd-pixel -p rd-codec
+      - name: Package universal client
+        run: bash .github/scripts/package-macos-client.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-client-macos
+          path: dist/lowlat-desk-client-macos
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: [host-windows, client-windows, client-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Zip packages
+        run: |
+          python3 - <<'PY'
+          import stat
+          import zipfile
+          from pathlib import Path
+
+          out = Path("release")
+          out.mkdir()
+          mac_bin = Path("dist/lowlat-desk-client-macos/rd-client.app/Contents/MacOS/rd-client")
+          if mac_bin.exists():
+              mac_bin.chmod(mac_bin.stat().st_mode | 0o755)
+          for folder in sorted(p for p in Path("dist").iterdir() if p.is_dir()):
+              dest = out / f"{folder.name}.zip"
+              with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                  for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+                      info = zipfile.ZipInfo.from_file(path, path.relative_to(folder).as_posix())
+                      mode = stat.S_IFREG | (path.stat().st_mode & 0o777)
+                      info.external_attr = mode << 16
+                      info.compress_type = zipfile.ZIP_DEFLATED
+                      with path.open("rb") as handle:
+                          archive.writestr(info, handle.read())
+              print(dest)
+          PY
+      - uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            release/lowlat-desk-host-windows-x64.zip
+            release/lowlat-desk-client-windows-x64.zip
+            release/lowlat-desk-client-macos.zip
+          body: |
+            预编译的阶段 1 程序，不需要安装 Rust 或额外运行库。
+
+            - `lowlat-desk-host-windows-x64.zip`：Windows 被控端
+            - `lowlat-desk-client-windows-x64.zip`：Windows 控制端
+            - `lowlat-desk-client-macos.zip`：macOS 控制端（arm64 + x86_64 通用 rd-client.app）
+
+            每个压缩包里都有 `使用说明.txt`。

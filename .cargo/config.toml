@@ -1,0 +1,5 @@
+# Statically link the MSVC C runtime so the Windows host and client do not
+# need the Visual C++ redistributable. The OpenH264 build script reads the
+# same `crt-static` feature and compiles its C++ objects with /MT.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -20,6 +20,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Test workspace
         run: cargo test --workspace --locked
+      - name: PE import checker
+        run: python3 .github/scripts/pe_imports.py --self-test
 
   host-windows:
     name: host (windows)
@@ -28,10 +30,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build host
-        run: cargo build --release --locked -p rd-host
       - name: Test protocol and codecs
         run: cargo test --release --locked -p rd-proto -p rd-pixel -p rd-codec
+      - name: Package host
+        shell: pwsh
+        run: .\.github\scripts\package-windows.ps1 -Which host
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-host-windows-x64
+          path: dist/lowlat-desk-host-windows-x64
+          if-no-files-found: error
 
   client-windows:
     name: client (windows)
@@ -40,8 +48,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build client
-        run: cargo build --release --locked -p rd-client
+      - name: Package client
+        shell: pwsh
+        run: .\.github\scripts\package-windows.ps1 -Which client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-client-windows-x64
+          path: dist/lowlat-desk-client-windows-x64
+          if-no-files-found: error
 
   client-macos:
     name: client (macos)
@@ -50,7 +64,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build client
-        run: cargo build --release --locked -p rd-client
       - name: Test protocol and codecs
         run: cargo test --locked -p rd-proto -p rd-pixel -p rd-codec
+      - name: Package universal client
+        run: bash .github/scripts/package-macos-client.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lowlat-desk-client-macos
+          path: dist/lowlat-desk-client-macos
+          if-no-files-found: error

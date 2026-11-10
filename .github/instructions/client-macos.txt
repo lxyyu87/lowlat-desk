@@ -1,0 +1,19 @@
+lowlat-desk 控制端（macOS，Apple 芯片和 Intel 通用）
+
+不需要安装 Rust。压缩包里的 rd-client.app 未签名，第一次打开会被系统拦截。
+
+在本目录打开“终端”，执行下面任一方式解除拦截：
+
+  右键 rd-client.app，选择“打开”，再点“打开”。
+
+  或执行：
+  xattr -dr com.apple.quarantine rd-client.app
+
+然后必须在终端里带上被控端地址运行（不要只双击 app，双击不会带上地址）：
+
+  ./rd-client.app/Contents/MacOS/rd-client --connect 192.168.1.20:47000
+
+把 192.168.1.20 换成被控 Windows 电脑的局域网 IP。端口默认是 47000。
+窗口出现后即可看到对方屏幕。
+
+仅适合可信局域网，没有身份验证。

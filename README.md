@@ -77,6 +77,18 @@ cargo test --workspace
 
 非 Windows 环境会正常编过被控端；真正的 DXGI 抓屏代码用 `cfg(windows)` 隔开。
 
+OpenH264 静态链进程序。Windows 上通过 `crt-static` 静态链接 MSVC 运行库，因此预编译包不需要再装 Visual C++。macOS 只依赖系统自带的 VideoToolbox、Metal 和 libc++。
+
+## 下载
+
+每次 CI 成功后，在该次 Actions 运行的 Artifacts 里可以下载三个包（不用自己编译）：
+
+- `lowlat-desk-host-windows-x64`：`rd-host.exe` 和 `使用说明.txt`
+- `lowlat-desk-client-windows-x64`：`rd-client.exe` 和 `使用说明.txt`
+- `lowlat-desk-client-macos`：通用二进制（arm64 + x86_64）的 `rd-client.app` 和 `使用说明.txt`
+
+推送 `v*` 标签时，`.github/workflows/release.yml` 会把同样的三个 zip 挂到 GitHub Release 上。
+
 ## 运行
 
 在被控的 Windows 机器上：
